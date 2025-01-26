@@ -44,8 +44,24 @@ class user {
     }
   }
 
+  async getUserDetails(req: Request, res: Response, next: NextFunction) {
+    try {
+  
+      const { email } = req.query;
+      const userDetail = await Knex.generateKnexQuery({
+        table: users,
+        where: { email },
+      });
+  
+      success(req, res, userDetail);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+
   async register(req: Request, res: Response, next: NextFunction) {
-    const { email, password, name } = req.body;
+    const { email, password, name, google_id } = req.body;
   
     try {
       const existingUser = await Knex.generateKnexQuery({
@@ -59,16 +75,22 @@ class user {
         return error(req, res, USER_EXIST);
       }
   
-      await Knex.generateKnexQuery({
+      const user = await Knex.generateKnexQuery({
         table: users,
         insert: {
           email,
-          password: hashPassword(password),
+          password: google_id ? null : hashPassword(password),
           username: name,
+          google_id,
         },
       });
-  
-      success(req, res, USER_REGISTERED);
+      const getUser = await Knex.generateKnexQuery({
+        table: users,
+        where: { id: user[0] },
+      });
+      const token = jwt.sign({ email: getUser[0].email, userId: getUser[0].id }, secretKey);
+
+      success(req, res, google_id ? token : USER_REGISTERED);
     } catch (err) {
       error(req, res, SOMETHING_ERROR_OCCURRED);
       next(err);
@@ -76,22 +98,28 @@ class user {
   }
 
   async login(req: Request, res: Response, next: NextFunction) {
-    const { email, password } = req.body;
+    const { email, password, google_id } = req.body;
 
     try {
       const user = await Knex.generateKnexQuery({
         table: users,
         where: { email },
-        limit: 2,
+        limit: 1,
       });
-      
-      if (!user) {
+
+      if (!user.length) {
         return error(req, res, INVALID_EMAIL);
       }
 
-      const isMatch = passwordCheck(password, user[0].password);
-      if (!isMatch) {
-        return error(req, res, INVALID_EMAIL);
+      if (google_id) {
+        if (user[0].googleId !== google_id) {
+          return error(req, res, INVALID_EMAIL);
+        }
+      } else {
+        const isMatch = passwordCheck(password, user[0].password);
+        if (!isMatch) {
+          return error(req, res, INVALID_EMAIL);
+        }
       }
 
       const token = jwt.sign({ email: user[0].email, userId: user[0].id }, secretKey);
